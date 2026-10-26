@@ -1,0 +1,40 @@
+[
+  {
+    "uf": "rs", "mun": "89060", "mun_nome": "BOA VISTA DO INCRA", "zona": "0017", "secao": "0191",
+    "bu_comparecimento": 92, "log_computed": 90, "fallback_candidates": 1,
+    "fallback_accepted": 1, "votes_without_time": 1,
+    "summary_pt": "Urna original (02320374) falhou duas vezes; urna de contingência (02317450) assumiu às 09:58. O BU tem 92 votos; os logs têm 90 'computado' e 1 'Voto confirmado para [Presidente]' às 09:42:39 sem 'computado' (fim do log). O voto restante não tem nenhum registro: o log mostra um eleitor identificado às 09:02:32–33 e nenhuma linha até a urna ser religada às 09:38:18.",
+    "evidence": [
+      "nested 0231745025102026095816-01.jez (urna 02320374): 15 computado 08:08:09–09:02:09; 09:02:33 'Foto do eleitor apresentada'; next line 09:38:59 'Início das operações do logd' (Urna ligada 09:38:18)",
+      "nested log: 09:42:25 'Eleitor foi habilitado', 09:42:39 'Voto confirmado para [Presidente]', end of log",
+      "logd.dat (urna 02317450, contingência): 09:58:16 'Arquivo 0231745025102026095816-01.jez referente ao log da ME'; 75 computado 10:03:11–16:10:58",
+      "bu.dat: eleição 6258, aptos 98, Presidente comparecimento 92 (also seen by the user on the TSE site)"
+    ],
+    "verified": "2026-10-26, manual inspection of log.jez and bu.dat"
+  },
+  {
+    "uf": "ba", "mun": "35653", "mun_nome": "IBOTIRAMA", "zona": "0173", "secao": "0235",
+    "bu_comparecimento": 217, "log_computed": 204, "fallback_candidates": 0,
+    "fallback_accepted": 0, "votes_without_time": 13,
+    "summary_pt": "A urna original (01833178) nunca abriu a votação: foi desligada pela chave várias vezes e às 07:48:10 parou com erro do leitor biométrico (5243, /dev/uescan). A urna de contingência (01656557) votou das 10:12 às 16:46 (204 votos). O BU tem 217: 13 votos não aparecem em nenhum log publicado.",
+    "evidence": [
+      "nested 0168198625102026084139-01.jez (urna 01833178, seção 0235): 0 computado on 25/10; 'Urna desligada pela chave' at 07:01:05, 07:13:46, 07:27:53, 07:40:30; 07:48:10 'Não é possível continuar a execução | Erro inesperado (5243) | Device open error /dev/uescan'",
+      "nested 0165655725102026100507-01.jez (urna 01833178 reloaded as seção 0083): 0 computado; 09:54:07 'GAP erro 72 | Validação do VOTA | Dados contidos na mídia de votação não correspondem'",
+      "logd.dat (urna 01656557, contingência → seção 0235): 204 computado 10:12:42–16:46:45",
+      "bu.dat: eleição 6258, aptos 288, Presidente comparecimento 217"
+    ],
+    "verified": "2026-10-26, manual inspection of log.jez and bu.dat"
+  },
+  {
+    "uf": "ma", "mun": "08893", "mun_nome": "SÃO JOSÉ DE RIBAMAR", "zona": "0047", "secao": "0609",
+    "bu_comparecimento": 224, "log_computed": 188, "fallback_candidates": 0,
+    "fallback_accepted": 0, "votes_without_time": 36,
+    "summary_pt": "O pacote de log tem só a urna de contingência (01664037, votos das 10:58 às 16:57, 188 votos) e um log de outra urna (01813459, carregada para a seção 0445) que tentou ler a mídia desta seção e falhou (GAP erro 72). O log da urna original da seção não foi publicado. O BU tem 224: 36 votos não aparecem em nenhum log publicado.",
+    "evidence": [
+      "nested 0166403725102026105122-01.jez (urna 01813459, declares seção 0445): 0 computado on 25/10; 10:29:43 and 10:35:21 'GAP erro 72 | Validação do VOTA | Dados contidos na mídia de votação não correspondem'",
+      "logd.dat (urna 01664037, contingência → seção 0609): 10:51:22 'Arquivo 0166403725102026105122-01.jez referente ao log da ME'; 188 computado 10:58:52–16:57:36",
+      "bu.dat: eleição 6258, aptos 247, Presidente comparecimento 224"
+    ],
+    "verified": "2026-10-26, manual inspection of log.jez and bu.dat"
+  }
+]

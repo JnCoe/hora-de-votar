@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# project data (raw/intermediate, large)
+/data/
+/TODO.md
+/knowledge.md

@@ -1,0 +1,13 @@
+[project]
+name = "hora-de-votar"
+version = "0.1.0"
+description = "Timeline of every vote cast in the 2026 Brazilian presidential runoff, from urna logs"
+requires-python = ">=3.12"
+dependencies = [
+    "polars>=1.0",
+    "httpx[http2]>=0.27",
+    "tqdm>=4.66",
+]
+
+[tool.uv]
+package = false
