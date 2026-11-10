@@ -33,13 +33,15 @@ HEADERS = {"User-Agent": "hora-de-votar/0.1 (pesquisa; dados abertos TSE)"}
 SECOES = DATA / "secoes.parquet"
 OFFICIAL_DIR = DATA / "official"
 
-# Per-run outputs. HDV_RUN=v2 writes to data/v2/..., leaving earlier runs untouched.
-RUN_DIR = DATA / os.environ["HDV_RUN"] if os.environ.get("HDV_RUN") else DATA
+# Per-run outputs live in data/<run>/. The final run is "v2"; set HDV_RUN to write a
+# separate run (e.g. HDV_RUN=test for a trial on a sample) without touching it.
+RUN_DIR = DATA / os.environ.get("HDV_RUN", "v2")
 VOTES_DIR = RUN_DIR / "votes"
 # votes inferred by logparse's fallback rule, kept apart from the computed votes
 FALLBACK_DIR = RUN_DIR / "votes_fallback"
 STATUS_DIR = RUN_DIR / "status"
 BU_DIR = RUN_DIR / "bu"  # raw bu.dat / busa.dat bytes per seção
+RECONCILIATION = RUN_DIR / "reconciliation.parquet"  # per-seção result of reconcile.py
 NOTES = ROOT / "pipeline" / "reconciliation_notes.json"
 
 

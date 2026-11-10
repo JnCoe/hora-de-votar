@@ -6,6 +6,10 @@ Times are converted from each urna's local clock to Brasília time (BRT):
   - Abroad: the IANA timezone of the city (tz_exterior.py); polls there close
     at 17:00 local, so "after closing" uses local time.
 
+The timeline has every computed vote, plus the "Voto confirmado" fallback votes
+that the seção's own BU confirms. reconcile.py decides which ones those are, so
+it must run first.
+
 Outputs docs/data/timeline.json and docs/data/stats.json.
 """
 
@@ -13,11 +17,12 @@ import argparse
 import io
 import json
 import zipfile
+from pathlib import Path
 
 import polars as pl
 
-from config import (BRT_OFFSET, DOCS_DATA, OFFICIAL_DIR, SECOES, STATUS_DIR,
-                    UF_UTC_OFFSET, VOTES_DIR, FALLBACK_DIR, load_status)
+from config import (BRT_OFFSET, DOCS_DATA, FALLBACK_DIR, OFFICIAL_DIR, RECONCILIATION, SECOES,
+                    UF_UTC_OFFSET, VOTES_DIR, load_status)
 from tz_exterior import utc_offset_seconds
 
 H = 3600
@@ -55,6 +60,24 @@ def load_locais() -> pl.DataFrame:
     return locais
 
 
+def accepted_fallback(rec: pl.DataFrame) -> pl.LazyFrame:
+    """Fallback votes (secao_id, t_local) of the seções whose BU confirms them.
+
+    reconcile.py accepts either every candidate of a seção or none of them, so
+    keeping whole seções is enough. The rejected candidates stay out of the timeline.
+    """
+    accepted = rec.filter(pl.col("fallback_accepted") > 0)
+    partial = accepted.filter(pl.col("fallback_accepted") != pl.col("n_fallback"))
+    if partial.height:
+        raise SystemExit(f"{partial.height} seções accept only some of their fallback votes; "
+                         "aggregate.py cannot tell which ones")
+    if not list(FALLBACK_DIR.glob("*.parquet")):
+        return pl.LazyFrame(schema={"secao_id": pl.UInt32, "t_local": pl.Int32})
+    return (pl.scan_parquet(FALLBACK_DIR / "*.parquet")
+            .join(accepted.lazy().select("secao_id"), on="secao_id", how="semi")
+            .select("secao_id", "t_local"))
+
+
 def secao_offsets(secoes: pl.DataFrame, status: pl.DataFrame) -> pl.DataFrame:
     """Seconds to add to each seção's local clock to get BRT, plus close time in BRT."""
     brazil = (secoes.filter(pl.col("uf") != "zz")
@@ -89,6 +112,9 @@ def main() -> None:
     ap.add_argument("--top", type=int, default=25)
     args = ap.parse_args()
 
+    if not RECONCILIATION.exists():
+        raise SystemExit(f"{RECONCILIATION} not found: run reconcile.py first")
+    rec = pl.read_parquet(RECONCILIATION)
     secoes = pl.read_parquet(SECOES).drop("agregadas")
     status = load_status()
     ok = status.filter(pl.col("status") == "ok")
@@ -96,11 +122,8 @@ def main() -> None:
     offs = secao_offsets(secoes, ok)
     meta = secoes.join(offs, on="secao_id")
 
-    # computed votes plus the ones inferred by the fallback rule (kept apart on disk)
-    sources = [pl.scan_parquet(VOTES_DIR / "*.parquet")]
-    if list(FALLBACK_DIR.glob("*.parquet")):
-        sources.append(pl.scan_parquet(FALLBACK_DIR / "*.parquet").select("secao_id", "t_local"))
-    votes = (pl.concat(sources)
+    computed = pl.scan_parquet(VOTES_DIR / "*.parquet").select("secao_id", "t_local")
+    votes = (pl.concat([computed, accepted_fallback(rec)], how="vertical_relaxed")
              .join(meta.lazy().select("secao_id", "uf", "shift", "close_brt"), on="secao_id")
              .with_columns(t=pl.col("t_local") + pl.col("shift"))
              .with_columns(late=pl.col("t") >= pl.col("close_brt"),
@@ -145,6 +168,9 @@ def main() -> None:
     official = pl.read_parquet(OFFICIAL_DIR / "mun_comparecimento.parquet")
     fetched_muns = per_sec.select("uf", "mun").unique()
     total = int(per_sec["votes"].sum())
+    expected = int(rec["timeline_votes"].sum())
+    if total != expected:
+        raise SystemExit(f"{total:,} votes on the timeline, but reconcile.py expects {expected:,}")
     late = int(per_sec["late"].sum())
 
     def top(df: pl.DataFrame, keys: list[str]) -> list[dict]:
@@ -153,15 +179,17 @@ def main() -> None:
                      (pl.col("late") > 0).sum().alias("secoes_late"),
                      pl.len().alias("secoes"), pl.col("last_t").max())
                 .with_columns(pct_late=pl.col("late") / pl.col("votes"))
-                .sort("late", descending=True).head(args.top).to_dicts())
+                # ties broken by the keys, so re-runs give the same top list
+                .sort(["late", *keys], descending=[True] + [False] * len(keys))
+                .head(args.top).to_dicts())
 
     uf_tab = (per_sec.group_by("uf")
               .agg(pl.col("votes").sum(), pl.col("late").sum(),
                    (pl.col("late") > 0).sum().alias("secoes_late"), pl.len().alias("secoes"),
                    pl.col("last_t").max())
               .with_columns(pct_late=pl.col("late") / pl.col("votes"))
-              .sort("late", descending=True))
-    latest = (per_sec.filter(pl.col("uf") != "zz").sort("last_t", descending=True)
+              .sort(["late", "uf"], descending=[True, False]))
+    latest = (per_sec.filter(pl.col("uf") != "zz").sort(["last_t", "secao_id"], descending=[True, False])
               .head(args.top).select("uf", "mun_nome", "zona", "secao", "local", "votes",
                                      "late", "last_t").to_dicts())
     close_hist = (per_sec.filter(pl.col("uf") != "zz")
@@ -188,10 +216,9 @@ def main() -> None:
         "close_histogram_15min": [{"bucket_min": int(b) * 15, "secoes": int(n)}
                                   for b, n in close_hist.iter_rows()],
         "tz_inferred_differs": meta.filter(pl.col("tz_differs"))
-        .group_by("uf", "mun_nome").len().to_dicts(),
+        .group_by("uf", "mun_nome").len().sort("uf", "mun_nome").to_dicts(),
     }
 
-    from pathlib import Path
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "timeline.json").write_text(json.dumps(timeline, separators=(",", ":")))

@@ -4,9 +4,9 @@ Resumable: seções already present in <run>/status/*.parquet are skipped
 (errors are retried on the next run). Raw logs never touch the disk; the
 (small) boletins are kept in <run>/bu/ so every seção can be reconciled later.
 
-    HDV_RUN=v2 uv run python fetch_parse.py --sample ../data/sample.parquet
-    HDV_RUN=v2 uv run python fetch_parse.py            # everything
-    HDV_RUN=v2 uv run python fetch_parse.py --shard 0/3  # one of 3 parallel processes
+    uv run python fetch_parse.py                     # everything
+    uv run python fetch_parse.py --shard 0/3         # one of 3 parallel processes
+    HDV_RUN=test uv run python fetch_parse.py --sample ../data/sample.parquet  # a trial run
 
 Every run writes to <run>/logs/: a readable log (fetch-*.log) and one JSON line
 per seção with every request made for it (events-*.jsonl).

@@ -1,6 +1,11 @@
 """Compare votes counted from logs with official comparecimento per município.
 
-Only municípios whose seções have all been fetched are compared.
+Only municípios whose seções have all been fetched are compared. Every fallback
+candidate is counted here, confirmed or not.
+
+A quick diagnostic from before the BUs were downloaded; reconcile.py is the real
+check (every seção against its own BU). The mismatched municípios it writes to
+data/mismatches.parquet are what fetch_parse.py --redo-mismatched re-parses.
 """
 
 import polars as pl

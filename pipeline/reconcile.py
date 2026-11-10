@@ -8,7 +8,7 @@ the script exits with an error.
 Also checks, per município, that the BUs add up to the official comparecimento,
 and that no vote (urna, time, line hash) is counted in more than one seção.
 
-    HDV_RUN=v2 uv run python reconcile.py
+    uv run python reconcile.py
 """
 
 import json
@@ -16,17 +16,18 @@ import sys
 
 import polars as pl
 
-from config import DOCS_DATA, NOTES, OFFICIAL_DIR, RUN_DIR, SECOES, VOTES_DIR, load_status
+from config import DOCS_DATA, NOTES, OFFICIAL_DIR, RECONCILIATION, SECOES, VOTES_DIR, load_status
 
 # category -> (description for the page, are the votes on the timeline?)
 CATEGORIES = {
     "match": ("Votos do log = comparecimento do BU", True),
-    "fallback_confirmado": ("Log termina após 'Voto confirmado' sem 'computado'; o BU confirma o voto", True),
-    "fallback_rejeitado": ("Log termina após 'Voto confirmado' sem 'computado'; o BU não conta o voto", True),
+    "fallback_confirmado": ("Log para após “Voto confirmado”, sem “computado”; o BU conta o voto", True),
+    "fallback_rejeitado": ("Log para após “Voto confirmado”, sem “computado”; o BU não conta o voto", True),
     "sem_arquivo": ("Seção sem nenhum arquivo publicado e sem comparecimento", True),
+    "nao_instalada": ("Seção não instalada segundo o TSE (sem arquivos, sem votos)", True),
     "cedula": ("Votação totalmente manual (cédulas): não existe horário dos votos", False),
     "log_nao_publicado": ("Urna eletrônica, mas o log não foi publicado pelo TSE", False),
-    "nota": ("Diferença verificada individualmente (ver nota)", None),
+    "nota": ("Falha de urna, verificada seção por seção (ver perguntas técnicas)", None),
     "pendente": ("Diferença ainda não explicada", None),
 }
 
@@ -42,6 +43,11 @@ def classify(r: dict, notes: dict) -> dict:
     out = {"fallback_accepted": 0, "votes_without_time": 0, "note": None}
     if r["status"] == "no_files" and bu is None:
         return {**out, "category": "sem_arquivo"}
+    # TSE's own aux: seção "Nao instalada", hash "Sem arquivo" (with a blank placeholder
+    # file entry, so the fetcher labels it no_log) and no BU
+    if (r["aux_st"] == "Nao instalada" and r["hash_st"] == "Sem arquivo" and bu is None
+            and not r["n_votes"]):
+        return {**out, "category": "nao_instalada"}
     if r["status"] == "no_log" and bu is not None:
         cat = "cedula" if r["bu_tp"] == "busa" else "log_nao_publicado"
         return {**out, "category": cat, "votes_without_time": bu}
@@ -66,7 +72,8 @@ def main() -> None:
     if only_fetched:
         fetched_muns = secoes.join(status.select("secao_id"), on="secao_id").select("uf", "mun").unique()
         secoes = secoes.join(fetched_muns, on=["uf", "mun"])
-    cols = ["secao_id", "status", "bu_tp", "bu_comparecimento", "n_votes", "n_fallback"]
+    cols = ["secao_id", "status", "aux_st", "hash_st", "bu_tp", "bu_comparecimento", "n_votes",
+            "n_fallback"]
     df = secoes.join(status.select(cols), on="secao_id", how="left")
     notes = load_notes()
     cls = pl.DataFrame([classify(r, notes) for r in df.iter_rows(named=True)],
@@ -75,7 +82,7 @@ def main() -> None:
     df = pl.concat([df, cls], how="horizontal").with_columns(
         timeline_votes=pl.col("n_votes").fill_null(0) + pl.col("fallback_accepted"),
         bu=pl.col("bu_comparecimento").fill_null(0))
-    df.write_parquet(RUN_DIR / "reconciliation.parquet")
+    df.write_parquet(RECONCILIATION)
 
     ok = True
     print("seções by category:")
@@ -99,7 +106,7 @@ def main() -> None:
     bad = df.filter(pl.col("category") != "pendente", pl.col("status").is_not_null(),
                     pl.col("timeline_votes") + pl.col("votes_without_time") != pl.col("bu"),
                     pl.col("category") != "fallback_rejeitado")
-    rejected = df.filter(pl.col("category") == "fallback_rejeitado")
+    rejected = df.filter(pl.col("category") == "fallback_rejeitado").sort("uf", "mun_nome", "zona", "secao")
     if bad.height:
         ok = False
         print(f"\n!! {bad.height} seções whose accounting does not add up:")
@@ -116,9 +123,15 @@ def main() -> None:
         print(f"\n!! {per_mun.height} municípios where the BUs do not add up to the official total:")
         print(per_mun)
 
-    dup = (pl.scan_parquet(VOTES_DIR / "*.parquet")
-           .group_by("urna", "t_local", "hash").agg(pl.col("secao_id").n_unique().alias("n"))
-           .filter(pl.col("n") > 1).collect(engine="streaming"))
+    # In slices by hash value: a duplicated vote has the same hash, so it always falls
+    # in the same slice. Doing all ~128M votes at once needs more RAM than the machine has.
+    slices = 16  # ~1.3 GB peak each (measured 645 MB for 1/32)
+    dup = pl.concat([
+        pl.scan_parquet(VOTES_DIR / "*.parquet")
+        .filter(pl.col("hash") % slices == i)
+        .group_by("urna", "t_local", "hash").agg(pl.col("secao_id").n_unique().alias("n"))
+        .filter(pl.col("n") > 1).collect(engine="streaming")
+        for i in range(slices)])
     if dup.height:
         ok = False
         print(f"\n!! {dup.height} votes appear in more than one seção")
@@ -127,7 +140,7 @@ def main() -> None:
     print(f"\nBU total {tot['bu'][0]:,} | on the timeline {tot['timeline_votes'][0]:,} | "
           f"without time {tot['votes_without_time'][0]:,} | official {official['comparecimento'].sum():,}")
 
-    exceptions = (df.filter(~pl.col("category").is_in(["match", "sem_arquivo"]))
+    exceptions = (df.filter(~pl.col("category").is_in(["match", "sem_arquivo", "nao_instalada"]))
                   .select("uf", "mun", "mun_nome", "zona", "secao", "category", "bu", "n_votes",
                           "n_fallback", "fallback_accepted", "votes_without_time", "note")
                   .sort("uf", "mun_nome", "zona", "secao"))
@@ -135,7 +148,8 @@ def main() -> None:
                                            pl.col("timeline_votes").sum().alias("votos_na_linha_do_tempo"),
                                            pl.col("votes_without_time").sum().alias("votos_sem_horario"))
                .with_columns(descricao=pl.col("category").replace_strict(
-                   {k: v[0] for k, v in CATEGORIES.items()}, return_dtype=pl.String)))
+                   {k: v[0] for k, v in CATEGORIES.items()}, return_dtype=pl.String))
+               .sort(["secoes", "category"], descending=[True, False]))
     DOCS_DATA.mkdir(parents=True, exist_ok=True)
     (DOCS_DATA / "reconciliation.json").write_text(json.dumps(
         {"complete": ok, "official_total": int(official["comparecimento"].sum()),

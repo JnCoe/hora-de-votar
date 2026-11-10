@@ -31,9 +31,11 @@ function el(tag, attrs = {}, parent) {
 const setText = (id, text) => { document.getElementById(id).textContent = text; };
 
 async function main() {
-  const [tl, st] = await Promise.all([
+  const [tl, st, rec] = await Promise.all([
     fetch(`${DATA_BASE}timeline.json`).then((r) => r.json()),
     fetch(`${DATA_BASE}stats.json`).then((r) => r.json()),
+    // optional: without it the page still works, minus the per-seção reconciliation table
+    fetch(`${DATA_BASE}reconciliation.json`).then((r) => r.json()).catch(() => null),
   ]);
   const slider = document.getElementById("slider");
   const minuteAt = (i) => tl.start_minute + i;
@@ -142,6 +144,7 @@ async function main() {
   build();
   setIndex(CLOSE_MIN - tl.start_minute); // start at the official close
   renderStats(st, tl);
+  if (rec) renderReconciliation(rec);
 }
 
 // Per-minute series for a scope, trimmed after its last vote.
@@ -514,6 +517,44 @@ function renderCoverage(st) {
   const row = el("tr", { class: "total" }, tb);
   el("td", { text: "Total" }, row);
   el("td", { text: fmt(missing), class: "num" }, row);
+}
+
+// Every seção with its own urna against its own boletim de urna (reconcile.py), one row per category.
+function renderReconciliation(rec) {
+  const rows = rec.summary.filter((r) => r.secoes > 0);
+  const secoes = rows.reduce((a, r) => a + r.secoes, 0);
+  const exact = rows.find((r) => r.category === "match");
+  document.getElementById("reconcile-intro").textContent =
+    `Além disso, cada uma das ${fmt(secoes)} seções com urna própria foi conferida com o seu próprio boletim de urna (BU), ` +
+    `o resultado que a urna imprime ao fim da votação. ` +
+    (exact ? `Em ${fmt(exact.secoes)} delas, os votos do log são exatamente os do BU. ` : "") +
+    (rec.complete
+      ? `Todas as outras têm a diferença explicada, e a soma dos BUs (${fmt(rec.bu_total)}) é igual ao comparecimento oficial ` +
+        `(${fmt(rec.official_total)}) em cada município.`
+      : `Ainda há seções com diferença não explicada.`);
+  if (rec.complete) {
+    document.getElementById("coverage").append(
+      ` Além disso, cada seção foi conferida com o seu próprio boletim de urna (veja as perguntas frequentes).`);
+  }
+
+  const t = document.getElementById("t-reconcile");
+  const tr = el("tr", {}, el("thead", {}, t));
+  for (const [h, cls] of [["Situação da seção", ""], ["Seções", "num"], ["Votos no BU", "num"], ["Sem horário", "num"]]) {
+    el("th", { text: h, class: cls, scope: "col" }, tr);
+  }
+  const tb = el("tbody", {}, t);
+  for (const r of rows) {
+    const row = el("tr", {}, tb);
+    el("td", { text: r.descricao, class: "wrap" }, row);
+    el("td", { text: fmt(r.secoes), class: "num" }, row);
+    el("td", { text: fmt(r.votos_bu), class: "num" }, row);
+    el("td", { text: r.votos_sem_horario ? fmt(r.votos_sem_horario) : "–", class: "num" }, row);
+  }
+  const tot = el("tr", { class: "total" }, tb);
+  el("td", { text: "Total" }, tot);
+  el("td", { text: fmt(secoes), class: "num" }, tot);
+  el("td", { text: fmt(rec.bu_total), class: "num" }, tot);
+  el("td", { text: fmt(rec.without_time_total), class: "num" }, tot);
 }
 
 function niceMax(v) {
